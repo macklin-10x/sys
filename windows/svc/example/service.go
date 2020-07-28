@@ -82,6 +82,12 @@ func runService(name string, isDebug bool) {
 	if isDebug {
 		run = debug.Run
 	}
+	defer func() {
+		if err := recover(); err != nil {
+			elog.Info(1, fmt.Sprintf("Recovered panic: %s", err))
+			panic(err)
+		}
+	}()
 	err = run(name, &myservice{})
 	if err != nil {
 		elog.Error(1, fmt.Sprintf("%s service failed: %v", name, err))

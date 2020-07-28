@@ -40,6 +40,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to determine if we are running in an interactive session: %v", err)
 	}
+
 	if !isIntSess {
 		runService(svcName, false)
 		return
