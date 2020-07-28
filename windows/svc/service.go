@@ -234,6 +234,12 @@ const (
 
 func (s *service) run() {
 	Elog.Info(1, "top of svc.service.run")
+	defer func() {
+		if err := recover(); err != nil {
+			Elog.Info(1, fmt.Sprintf("Recovered panic: %s", err))
+			panic(err)
+		}
+	}()
 	swallowedErr := s.goWaits.Wait()
 	Elog.Info(1, fmt.Sprintf("finished s.goWaits.Wait with swallowed error: %+v", swallowedErr))
 	s.h = windows.Handle(ssHandle)
