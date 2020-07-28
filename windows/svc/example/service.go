@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/debug"
 	"golang.org/x/sys/windows/svc/eventlog"
@@ -21,6 +22,7 @@ var elog debug.Log
 type myservice struct{}
 
 func (m *myservice) Execute(args []string, r <-chan svc.ChangeRequest, changes chan<- svc.Status) (ssec bool, errno uint32) {
+	elog.Info(1, "Top of execute.")
 	const cmdsAccepted = svc.AcceptStop | svc.AcceptShutdown | svc.AcceptPauseAndContinue
 	changes <- svc.Status{State: svc.StartPending}
 	fasttick := time.Tick(500 * time.Millisecond)
@@ -71,6 +73,8 @@ func runService(name string, isDebug bool) {
 			return
 		}
 	}
+	svc.Elog = elog
+	windows.Elog = elog
 	defer elog.Close()
 
 	elog.Info(1, fmt.Sprintf("starting %s service", name))

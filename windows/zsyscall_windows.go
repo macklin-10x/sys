@@ -3,6 +3,8 @@
 package windows
 
 import (
+	"fmt"
+	"runtime/debug"
 	"syscall"
 	"unsafe"
 )
@@ -507,7 +509,9 @@ func ControlService(service Handle, control uint32, status *SERVICE_STATUS) (err
 }
 
 func StartServiceCtrlDispatcher(serviceTable *SERVICE_TABLE_ENTRY) (err error) {
+	Elog.Info(1, "top of start service ctrl dispatcher, making syscall")
 	r1, _, e1 := syscall.Syscall(procStartServiceCtrlDispatcherW.Addr(), 1, uintptr(unsafe.Pointer(serviceTable)), 0, 0)
+	Elog.Info(1, "service ctrl dispatcher returned.")
 	if r1 == 0 {
 		if e1 != 0 {
 			err = errnoErr(e1)
@@ -1301,8 +1305,23 @@ func DuplicateHandle(hSourceProcessHandle Handle, hSourceHandle Handle, hTargetP
 	return
 }
 
+type TestLog interface {
+	Close() error
+	Info(eid uint32, msg string) error
+	Warning(eid uint32, msg string) error
+	Error(eid uint32, msg string) error
+}
+
+var Elog TestLog
+
 func WaitForSingleObject(handle Handle, waitMilliseconds uint32) (event uint32, err error) {
-	r0, _, e1 := syscall.Syscall(procWaitForSingleObject.Addr(), 2, uintptr(handle), uintptr(waitMilliseconds), 0)
+	Elog.Info(1, "top of wait for single object")
+	Elog.Info(1, string(debug.Stack()))
+
+	addr := procWaitForSingleObject.Addr()
+	Elog.Info(1, fmt.Sprintf("sys.Syscall(%s, %s, %s, %s, %s)", addr, 2, uintptr(handle), uintptr(waitMilliseconds), 0))
+	r0, _, e1 := syscall.Syscall(addr, 2, uintptr(handle), uintptr(waitMilliseconds), 0)
+	Elog.Info(1, "finished syscall")
 	event = uint32(r0)
 	if event == 0xffffffff {
 		if e1 != 0 {

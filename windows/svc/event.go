@@ -8,6 +8,7 @@ package svc
 
 import (
 	"errors"
+	"fmt"
 
 	"golang.org/x/sys/windows"
 )
@@ -35,7 +36,15 @@ func (e *event) Set() error {
 }
 
 func (e *event) Wait() error {
+	Elog.Info(1, fmt.Sprintf("waiting for object e.h: %+v", e.h))
+	defer func() {
+		if err := recover(); err != nil {
+			Elog.Info(1, fmt.Sprintf("Recovered panic: %s", err))
+			panic(err)
+		}
+	}()
 	s, err := windows.WaitForSingleObject(e.h, windows.INFINITE)
+	Elog.Info(1, "never make it here")
 	switch s {
 	case windows.WAIT_OBJECT_0:
 		break

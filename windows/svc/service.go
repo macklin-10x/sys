@@ -10,6 +10,7 @@ package svc
 
 import (
 	"errors"
+	"fmt"
 	"runtime"
 	"syscall"
 	"unsafe"
@@ -17,6 +18,15 @@ import (
 	"golang.org/x/sys/internal/unsafeheader"
 	"golang.org/x/sys/windows"
 )
+
+type TestLog interface {
+	Close() error
+	Info(eid uint32, msg string) error
+	Warning(eid uint32, msg string) error
+	Error(eid uint32, msg string) error
+}
+
+var Elog TestLog
 
 // State describes service execution state (Stopped, Running and so on).
 type State uint32
@@ -223,10 +233,14 @@ const (
 )
 
 func (s *service) run() {
-	s.goWaits.Wait()
+	Elog.Info(1, "top of svc.service.run")
+	swallowedErr := s.goWaits.Wait()
+	Elog.Info(1, fmt.Sprintf("finished s.goWaits.Wait with swallowed error: %+v", swallowedErr))
 	s.h = windows.Handle(ssHandle)
+	Elog.Info(1, "called windows.Handle(ssHandle)")
 
 	var argv []*uint16
+	Elog.Info(1, "some unsafe pointer shit")
 	hdr := (*unsafeheader.Slice)(unsafe.Pointer(&argv))
 	hdr.Data = unsafe.Pointer(sArgv)
 	hdr.Len = int(sArgc)
@@ -242,6 +256,7 @@ func (s *service) run() {
 	exitFromHandler := make(chan exitCode)
 
 	go func() {
+		Elog.Info(1, "running s.handler.Execute in yet another goroutine")
 		ss, errno := s.handler.Execute(args, cmdsToHandler, changesFromHandler)
 		exitFromHandler <- exitCode{ss, errno}
 	}()
@@ -252,10 +267,12 @@ func (s *service) run() {
 	}
 	var outch chan ChangeRequest
 	inch := s.c
+	Elog.Info(1, "starting service monitor loop")
 loop:
 	for {
 		select {
 		case r := <-inch:
+			Elog.Info(1, fmt.Sprintf("select from inch: %+v", r))
 			if r.errno != 0 {
 				ec.errno = r.errno
 				break loop
@@ -267,9 +284,11 @@ loop:
 			outcr.EventData = r.eventData
 			outcr.Context = r.context
 		case outch <- outcr:
+			Elog.Info(1, fmt.Sprintf("select from outcr: %+v", outch))
 			inch = s.c
 			outch = nil
 		case c := <-changesFromHandler:
+			Elog.Info(1, fmt.Sprintf("select from changesFromHandler: %+v", c))
 			err := s.updateStatus(&c, &ec)
 			if err != nil {
 				// best suitable error number
@@ -281,10 +300,11 @@ loop:
 			}
 			outcr.CurrentStatus = c
 		case ec = <-exitFromHandler:
+			Elog.Info(1, fmt.Sprintf("select from exitFromHandler: %+v", ec))
 			break loop
 		}
 	}
-
+	Elog.Info(1, "stopping, running s.updateStatus")
 	s.updateStatus(&Status{State: Stopped}, &ec)
 	s.cWaits.Set()
 }
@@ -314,16 +334,24 @@ func newCallback(fn interface{}) (cb uintptr, err error) {
 
 // Run executes service name by calling appropriate handler function.
 func Run(name string, handler Handler) error {
+	Elog.Info(1, "top of svc.Run, locking OS thread")
 	runtime.LockOSThread()
-
+	Elog.Info(1, "locked OS thread")
 	tid := windows.GetCurrentThreadId()
-
+	Elog.Info(1, "got thread ID")
 	s, err := newService(name, handler)
+	Elog.Info(1, fmt.Sprintf("Created service %v with err %v", s, err))
 	if err != nil {
 		return err
 	}
 
 	ctlHandler := func(ctl, evtype, evdata, context uintptr) uintptr {
+		defer func() {
+			if err := recover(); err != nil {
+				Elog.Info(1, fmt.Sprintf("panic in svc.Run.ctlHandler: %s", err))
+				panic(err)
+			}
+		}()
 		e := ctlEvent{cmd: Cmd(ctl), eventType: uint32(evtype), eventData: evdata, context: context}
 		// We assume that this callback function is running on
 		// the same thread as Run. Nowhere in MS documentation
@@ -332,6 +360,7 @@ func Run(name string, handler Handler) error {
 		// quickly, if ignored.
 		i := windows.GetCurrentThreadId()
 		if i != tid {
+			Elog.Info(1, "Problematic thread condition triggered.")
 			e.errno = sysErrNewThreadInCallback
 		}
 		s.c <- e
@@ -340,6 +369,7 @@ func Run(name string, handler Handler) error {
 	}
 
 	var svcmain uintptr
+	Elog.Info(1, "getting service main")
 	getServiceMain(&svcmain)
 	t := []windows.SERVICE_TABLE_ENTRY{
 		{ServiceName: syscall.StringToUTF16Ptr(s.name), ServiceProc: svcmain},
@@ -354,9 +384,18 @@ func Run(name string, handler Handler) error {
 		return err
 	}
 
+	Elog.Info(1, "calling s.run")
 	go s.run()
 
+	Elog.Info(1, "start service ctrl dispatcher")
+	defer func() {
+		if err := recover(); err != nil {
+			Elog.Info(1, fmt.Sprintf("panic in svc.Run: %s", err))
+			panic(err)
+		}
+	}()
 	err = windows.StartServiceCtrlDispatcher(&t[0])
+	Elog.Info(1, fmt.Sprintf("service ctrl dispatcher returned err: %s", err))
 	if err != nil {
 		return err
 	}
